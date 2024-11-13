@@ -462,8 +462,12 @@ export default function Home() {
   const [selectedModels, setSelectedModels] = useState<Model[]>([]);
   const [modelChats, setModelChats] = useState<ModelChat[]>([]);
   const [apiConfig, setApiConfig] = useState<APIConfig>({
-    baseUrl: 'https://aiproxy.hzh.sealos.run',
-    apiKey: 'sk-tLMuhdnWARSFd6OPC542Ac6cF9324d7889Bc93C0C8C3E15b'
+    baseUrl: '',
+    apiKey: ''
+  });
+  const [tempApiConfig, setTempApiConfig] = useState<APIConfig>({
+    baseUrl: '',
+    apiKey: ''
   });
   const [showApiConfig, setShowApiConfig] = useState(false);
   const resizeRef = useRef<{ [key: string]: HTMLDivElement | null }>({});
@@ -481,6 +485,12 @@ export default function Home() {
   const [language, setLanguage] = useState<'en' | 'zh'>('en');
   const [includeHistory, setIncludeHistory] = useState(true);
   const [globalStreamEnabled, setGlobalStreamEnabled] = useState(true);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  // 添加新的状态
+  const [isModelTesting, setIsModelTesting] = useState<string>(''); // 存储正在测试的模型ID
+  const [testProgress, setTestProgress] = useState(0);
+  const [testLogs, setTestLogs] = useState<string[]>([]);
+  const [showTestResults, setShowTestResults] = useState(false);
 
   // 获取当前语言的翻译
   const t = translations[language];
@@ -573,7 +583,7 @@ export default function Home() {
         return chat;
       }));
     } else {
-      // 如果不存在历史记录，则创建新的聊天记录
+      // 如果不存在，则创建新的天记
       setModelChats(prev => [...prev, {
         modelId: model.id,
         messages: [],
@@ -609,6 +619,7 @@ export default function Home() {
 
     selectedModels.forEach(async model => {
       try {
+        // 优先使用模型自定义的配置，如果没有则使用全局配置
         const baseUrl = model.customBaseUrl || apiConfig.baseUrl;
         const apiKey = model.customApiKey || apiConfig.apiKey;
 
@@ -617,7 +628,7 @@ export default function Home() {
           ? (currentChat ? [...currentChat.messages, userMessage] : [userMessage])
           : [userMessage];
 
-        // 根据模型类型决定是否使用流式输出
+        // 根据模型类型决是否使流输
         const useStream = globalStreamEnabled && !isO1Model(model.id);
 
         const response = await fetch(`${baseUrl}/v1/chat/completions`, {
@@ -740,16 +751,19 @@ export default function Home() {
       localStorage.setItem('selectedModels', JSON.stringify(updatedModels));
     }
     
-    // 更新modelChats，只隐藏被删除模型的聊天框，但保留其聊天记录
-    setModelChats(prev => prev.map(chat => {
-      if (chat.modelId === modelId) {
-        return {
-          ...chat,
-          isHidden: true // 添加一个标记来隐藏聊天框，而不是删除记录
-        };
-      }
-      return chat;
-    }));
+    // 完全删除该模型的聊天记录
+    setModelChats(prev => prev.filter(chat => chat.modelId !== modelId));
+    
+    // 更新本地存储中的聊天记录
+    const updatedChats = modelChats.filter(chat => chat.modelId !== modelId);
+    if (updatedChats.length === 0) {
+      localStorage.removeItem('modelChats');
+    } else {
+      localStorage.setItem('modelChats', JSON.stringify(updatedChats));
+    }
+
+    // 删除该模型的自定义配置
+    localStorage.removeItem(`model_config_${modelId}`);
   };
 
   const handleResize = (modelId: string, newWidth: number) => {
@@ -779,9 +793,113 @@ export default function Home() {
     setIsModelSelectorOpen(false);
   };
 
-  // 添加测试连接函
-  const testConnection = async (model: EditingModel | CustomModel) => {
+  // 修改全局配置测试函数
+  const testGlobalConfig = async (config: APIConfig) => {
     setIsTestingConnection(true);
+    setTestProgress(0);
+    setTestLogs([]);
+    setShowTestResults(true);
+
+    try {
+      if (selectedModels.length === 0) {
+        throw new Error('No models selected');
+      }
+
+      let allSuccess = true;
+      const results = [];
+      const totalModels = selectedModels.length;
+
+      // 测试所有选中的模型
+      for (let i = 0; i < selectedModels.length; i++) {
+        const model = selectedModels[i];
+        setTestProgress((i / totalModels) * 100);
+        setTestLogs(prev => [...prev, `Testing ${model.name}...`]);
+
+        // 如果模型有自定义配置，优先使用模型的配置进行测试
+        const testConfig = {
+          baseUrl: model.customBaseUrl || config.baseUrl,
+          apiKey: model.customApiKey || config.apiKey
+        };
+
+        // 检查配置是否完整
+        if (!testConfig.baseUrl || !testConfig.apiKey) {
+          const message = `${model.name}: Missing API configuration`;
+          results.push(message);
+          setTestLogs(prev => [...prev, message]);
+          allSuccess = false;
+          continue;
+        }
+
+        try {
+          const response = await fetch(`${testConfig.baseUrl}/v1/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${testConfig.apiKey}`
+            },
+            body: JSON.stringify({
+              model: model.id,
+              messages: [{ role: 'user', content: 'Test connection' }],
+              temperature: 0.7,
+              max_tokens: 10
+            }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            const errorMessage = data.error?.message || 'Unknown error';
+            const message = errorMessage.includes('model')
+              ? `${model.name}: ${t.ui.modelNotAvailable}`
+              : `${model.name}: ${errorMessage}`;
+            results.push(message);
+            setTestLogs(prev => [...prev, message]);
+            allSuccess = false;
+            continue;
+          }
+
+          // 检查模型是否真正可用
+          if (data.choices && data.choices.length > 0) {
+            const message = `${model.name}: ${t.ui.connectionSuccess}${
+              model.customBaseUrl || model.customApiKey ? t.ui.usingModelConfig : ''
+            }`;
+            results.push(message);
+            setTestLogs(prev => [...prev, message]);
+          } else {
+            const message = `${model.name}: ${t.ui.modelNotAvailable}`;
+            results.push(message);
+            setTestLogs(prev => [...prev, message]);
+            allSuccess = false;
+          }
+        } catch (error) {
+          const message = `${model.name}: ${error instanceof Error ? error.message : 'Unknown error'}`;
+          results.push(message);
+          setTestLogs(prev => [...prev, message]);
+          allSuccess = false;
+        }
+      }
+
+      setTestProgress(100);
+      return allSuccess;
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setTestLogs(prev => [...prev, `Error: ${errorMessage}`]);
+      return false;
+    } finally {
+      setIsTestingConnection(false);
+      // 5秒后自动关闭结果显示
+      setTimeout(() => {
+        setShowTestResults(false);
+        setTestLogs([]);
+        setTestProgress(0);
+      }, 5000);
+    }
+  };
+
+  // 修改单个模型的测试函数
+  const testModelConnection = async (model: Model) => {
+    setIsModelTesting(model.id);
     try {
       const baseUrl = model.customBaseUrl || apiConfig.baseUrl;
       const apiKey = model.customApiKey || apiConfig.apiKey;
@@ -809,31 +927,60 @@ export default function Home() {
     } catch (error) {
       alert(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
-      setIsTestingConnection(false);
+      setIsModelTesting('');
     }
   };
 
-  // 添加编辑模型函数
+  // 修改保存并应用配置的函数
+  const saveAndApplyConfig = async () => {
+    // 先测试配置
+    const testResult = await testGlobalConfig(tempApiConfig);
+    if (testResult) {
+      // 测试成功后保存配置
+      setApiConfig(tempApiConfig);
+      localStorage.setItem('globalApiConfig', JSON.stringify(tempApiConfig));
+      alert(t.ui.configSaved);
+    }
+  };
+
+  // 修改 handleEditModel 函数
   const handleEditModel = (model: Model) => {
     if (!model) return;
     
+    // 不再打开模型选择器，而是设置编辑状态
     setEditingModel({
       ...model,
-      customBaseUrl: (model as EditingModel).customBaseUrl || apiConfig.baseUrl,
-      customApiKey: (model as EditingModel).customApiKey || apiConfig.apiKey
+      customBaseUrl: model.customBaseUrl || '',
+      customApiKey: model.customApiKey || ''
     });
-    setIsModelSelectorOpen(true);
+    // 打开编辑对话框
+    setShowEditDialog(true);
   };
 
-  // 更新保存辑函数
+  // 修改 handleSaveEdit 函数
   const handleSaveEdit = () => {
     if (!editingModel) return;
 
+    // 更新选中的模型列表，保存自定义的 API Key 和 Base URL
     setSelectedModels(prev => prev.map(model => 
-      model.id === editingModel.id ? editingModel : model
+      model.id === editingModel.id 
+        ? {
+            ...model,
+            customBaseUrl: editingModel.customBaseUrl,
+            customApiKey: editingModel.customApiKey
+          }
+        : model
     ));
+
+    // 保存到 localStorage
+    const modelConfig = {
+      customBaseUrl: editingModel.customBaseUrl,
+      customApiKey: editingModel.customApiKey
+    };
+    localStorage.setItem(`model_config_${editingModel.id}`, JSON.stringify(modelConfig));
+
     setEditingModel(null);
-    setIsModelSelectorOpen(false);
+    setShowEditDialog(false);
   };
 
   // 修改 handleRegenerateSingle 函数
@@ -841,46 +988,41 @@ export default function Home() {
     const model = selectedModels.find(m => m.id === modelId);
     if (!model) return;
 
+    // 找到当前聊天记录
+    const currentChat = modelChats.find(chat => chat.modelId === modelId);
+    if (!currentChat) return;
+
+    // 找到用户消息的索引
+    const userMessageIndex = currentChat.messages.findIndex(msg => 
+      msg.role === 'user' && msg.content === userMessage.content
+    );
+    if (userMessageIndex === -1) return;
+
+    // 设置加载状态并只删除当前用户消息后的一条助手回复
     setModelChats(prev => prev.map(chat => {
       if (chat.modelId !== modelId) return chat;
-      
-      const messageIndex = chat.messages.findIndex(msg => 
-        msg.role === 'user' && msg.content === userMessage.content
-      );
-      
-      if (messageIndex === -1) return chat;
 
-      // 找到这条用户消息后面的第一条AI回复
-      const nextAssistantIndex = chat.messages.findIndex((msg, index) => 
-        index > messageIndex && msg.role === 'assistant'
-      );
+      const messages = [...chat.messages];
+      // 只删除当前用户消息后的一条助手回复
+      if (userMessageIndex + 1 < messages.length && messages[userMessageIndex + 1].role === 'assistant') {
+        messages.splice(userMessageIndex + 1, 1);
+      }
 
-      if (nextAssistantIndex === -1) return chat;
-
-      // 保留所有消息，只删除要重新生成的那条AI回复
-      const messages = [
-        ...chat.messages.slice(0, nextAssistantIndex),
-        ...chat.messages.slice(nextAssistantIndex + 1)
-      ];
-      
       return {
         ...chat,
         isLoading: true,
-        messages: messages
+        messages
       };
     }));
 
     try {
       const baseUrl = model.customBaseUrl || apiConfig.baseUrl;
       const apiKey = model.customApiKey || apiConfig.apiKey;
-      const useStream = !isO1Model(model.id);
+      const useStream = globalStreamEnabled && !isO1Model(model.id);
 
-      // 获取当前模型的聊天历史，只包含到当前用户息为止的历史
-      const currentChat = modelChats.find(chat => chat.modelId === modelId);
-      const chatHistory = includeHistory && currentChat 
-        ? currentChat.messages.slice(0, currentChat.messages.findIndex(m => 
-            m.role === 'user' && m.content === userMessage.content
-          ) + 1)
+      // 准备聊天历史，只包含到当前用户消息为止的历史
+      const chatHistory = includeHistory 
+        ? currentChat.messages.slice(0, userMessageIndex + 1)
         : [userMessage];
 
       const response = await fetch(`${baseUrl}/v1/chat/completions`, {
@@ -904,29 +1046,57 @@ export default function Home() {
       if (!response.ok) throw new Error('Request failed');
 
       if (useStream) {
-        // 原有的流式输出处理逻辑
-        // ... 保持不变 ...
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let accumulatedContent = '';
+
+        // 添加一个空的助手消息在正确的位置
+        setModelChats(prev => prev.map(chat => {
+          if (chat.modelId !== modelId) return chat;
+          const messages = [...chat.messages];
+          messages.splice(userMessageIndex + 1, 0, {
+            role: 'assistant',
+            content: '',
+            modelId: model.id
+          });
+          return { ...chat, messages };
+        }));
+
+        while (true) {
+          const { done, value } = await reader!.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          const newContent = parseSSEResponse(chunk);
+          accumulatedContent += newContent;
+
+          setModelChats(prev => prev.map(chat => {
+            if (chat.modelId !== modelId) return chat;
+            const messages = [...chat.messages];
+            messages[userMessageIndex + 1] = {
+              role: 'assistant',
+              content: accumulatedContent,
+              modelId: model.id
+            };
+            return {
+              ...chat,
+              messages,
+              isLoading: false
+            };
+          }));
+        }
       } else {
-        // 非流式输出处理
         const data = await response.json();
         const content = data.choices[0]?.message?.content || '';
 
         setModelChats(prev => prev.map(chat => {
           if (chat.modelId !== modelId) return chat;
-          
-          const messageIndex = chat.messages.findIndex(msg => 
-            msg.role === 'user' && msg.content === userMessage.content
-          );
-
-          if (messageIndex === -1) return chat;
-
           const messages = [...chat.messages];
-          messages[messageIndex + 1] = {
+          messages.splice(userMessageIndex + 1, 0, {
             role: 'assistant',
             content: content,
             modelId: model.id
-          };
-
+          });
           return {
             ...chat,
             messages,
@@ -934,32 +1104,16 @@ export default function Home() {
           };
         }));
       }
-
-      // 完成后移除加载状态
-      setModelChats(prev => prev.map(chat => 
-        chat.modelId === modelId ? { ...chat, isLoading: false } : chat
-      ));
-
     } catch (error) {
       console.error(`Error with model ${model.id}:`, error);
       setModelChats(prev => prev.map(chat => {
         if (chat.modelId !== modelId) return chat;
-        
-        const messageIndex = chat.messages.findIndex(msg => 
-          msg.role === 'user' && msg.content === userMessage.content
-        );
-
-        if (messageIndex === -1) return chat;
-
-        const errorMessage: Message = {
+        const messages = [...chat.messages];
+        messages.splice(userMessageIndex + 1, 0, {
           role: 'assistant',
           content: `Error: Failed to get response from ${model.id}`,
           modelId: model.id
-        };
-
-        const messages = [...chat.messages];
-        messages[messageIndex + 1] = errorMessage;
-
+        });
         return {
           ...chat,
           isLoading: false,
@@ -971,21 +1125,54 @@ export default function Home() {
 
   // 修改 handleRegenerate 函数
   const handleRegenerate = async () => {
-    const lastUserMessage = modelChats.flatMap(chat => chat.messages).find(msg => msg.role === 'user');
-    if (!lastUserMessage) return;
+    // 找到每个聊天中最后一条用户消息
+    const modelChatsWithLastUserMessage = modelChats
+      .filter(chat => !chat.isHidden) // 只处理未隐藏的聊天
+      .map(chat => {
+        const messages = [...chat.messages];
+        const lastUserIndex = messages.findLastIndex(msg => msg.role === 'user');
+        return {
+          chatId: chat.modelId,
+          lastUserMessage: lastUserIndex !== -1 ? messages[lastUserIndex] : null,
+          lastUserIndex
+        };
+      })
+      .filter(item => item.lastUserMessage);
 
-    // 设置所有模型的加载状态
-    setModelChats(prev => prev.map(chat => ({
-      ...chat,
-      isLoading: true,
-      messages: chat.messages.filter(msg => msg.role !== 'assistant')
-    })));
+    if (modelChatsWithLastUserMessage.length === 0) return;
 
-    selectedModels.forEach(async model => {
+    // 为个模型的聊天设置加载状态并删除最后一条助手回复
+    setModelChats(prev => prev.map(chat => {
+      const messages = [...chat.messages];
+      const lastUserIndex = messages.findLastIndex(msg => msg.role === 'user');
+      
+      if (lastUserIndex !== -1) {
+        // 删除最后一条用户消息后的所有消息
+        messages.splice(lastUserIndex + 1);
+      }
+
+      return {
+        ...chat,
+        isLoading: true,
+        messages
+      };
+    }));
+
+    // 为每个模型重新生成回复
+    for (const { chatId, lastUserMessage, lastUserIndex } of modelChatsWithLastUserMessage) {
+      const model = selectedModels.find(m => m.id === chatId);
+      if (!model || !lastUserMessage) continue;
+
       try {
         const baseUrl = model.customBaseUrl || apiConfig.baseUrl;
         const apiKey = model.customApiKey || apiConfig.apiKey;
         const useStream = globalStreamEnabled && !isO1Model(model.id);
+
+        // 获取当前模型的聊天历史
+        const currentChat = modelChats.find(chat => chat.modelId === chatId);
+        const chatHistory = includeHistory && currentChat
+          ? currentChat.messages.slice(0, lastUserIndex + 1)
+          : [lastUserMessage];
 
         const response = await fetch(`${baseUrl}/v1/chat/completions`, {
           method: 'POST',
@@ -995,7 +1182,10 @@ export default function Home() {
           },
           body: JSON.stringify({
             model: model.id,
-            messages: [{ role: 'user', content: lastUserMessage.content }],
+            messages: chatHistory.map(msg => ({
+              role: msg.role,
+              content: msg.content
+            })),
             temperature: 0.7,
             max_tokens: 1000,
             stream: useStream
@@ -1009,6 +1199,19 @@ export default function Home() {
           const decoder = new TextDecoder();
           let accumulatedContent = '';
 
+          // 添加一个空的助手消息
+          setModelChats(prev => prev.map(chat => {
+            if (chat.modelId !== chatId) return chat;
+            return {
+              ...chat,
+              messages: [...chat.messages, {
+                role: 'assistant',
+                content: '',
+                modelId: model.id
+              }]
+            };
+          }));
+
           while (true) {
             const { done, value } = await reader!.read();
             if (done) break;
@@ -1018,14 +1221,17 @@ export default function Home() {
             accumulatedContent += newContent;
 
             setModelChats(prev => prev.map(chat => {
-              if (chat.modelId !== model.id) return chat;
+              if (chat.modelId !== chatId) return chat;
+              const messages = [...chat.messages];
+              messages[messages.length - 1] = {
+                role: 'assistant',
+                content: accumulatedContent,
+                modelId: model.id
+              };
               return {
                 ...chat,
-                messages: [...chat.messages.filter(msg => msg.role !== 'assistant'), {
-                  role: 'assistant',
-                  content: accumulatedContent,
-                  modelId: model.id
-                }]
+                messages,
+                isLoading: false
               };
             }));
           }
@@ -1034,10 +1240,10 @@ export default function Home() {
           const content = data.choices[0]?.message?.content || '';
 
           setModelChats(prev => prev.map(chat => {
-            if (chat.modelId !== model.id) return chat;
+            if (chat.modelId !== chatId) return chat;
             return {
               ...chat,
-              messages: [...chat.messages.filter(msg => msg.role !== 'assistant'), {
+              messages: [...chat.messages, {
                 role: 'assistant',
                 content: content,
                 modelId: model.id
@@ -1046,19 +1252,14 @@ export default function Home() {
             };
           }));
         }
-
-        setModelChats(prev => prev.map(chat => 
-          chat.modelId === model.id ? { ...chat, isLoading: false } : chat
-        ));
-
       } catch (error) {
         console.error(`Error with model ${model.id}:`, error);
         setModelChats(prev => prev.map(chat => {
-          if (chat.modelId !== model.id) return chat;
+          if (chat.modelId !== chatId) return chat;
           return {
             ...chat,
             isLoading: false,
-            messages: [...chat.messages.filter(msg => msg.role !== 'assistant'), {
+            messages: [...chat.messages, {
               role: 'assistant',
               content: `Error: Failed to get response from ${model.id}`,
               modelId: model.id
@@ -1066,7 +1267,7 @@ export default function Home() {
           };
         }));
       }
-    });
+    }
   };
 
   // 从本地存储加载聊天记录
@@ -1086,7 +1287,7 @@ export default function Home() {
     }
   }, []);
 
-  // 聊天记录或选中的模发生变化时保存到本地存储
+  // 聊天记录或选中的模发生变化时保存本地存储
   useEffect(() => {
     if (modelChats.length > 0) {
       localStorage.setItem('modelChats', JSON.stringify(modelChats));
@@ -1107,28 +1308,29 @@ export default function Home() {
     }
   };
 
-  // 添加一个新的清除所有记录的函数
-  const clearAllChats = () => {
-    if (window.confirm(t.ui.confirmClearAllChats)) {
-      // 清除所有聊天记录
-      setModelChats(prev => prev.map(chat => ({
-        ...chat,
-        messages: []
-      })));
-      // 清除本地存储
-      localStorage.removeItem('modelChats');
-      localStorage.removeItem('selectedModels');
+  // 修改清除所有模型的函数
+  const clearAllModels = () => {
+    if (window.confirm(t.ui.confirmClearAllModels)) {
       // 清除选中的模型
       setSelectedModels([]);
+      // 清除所有聊天记录
+      setModelChats([]);
+      // 清除本地存储
+      localStorage.removeItem('selectedModels');
+      localStorage.removeItem('modelChats');
     }
   };
 
-  // 添加一个新的清除所有模型的函数
-  const clearAllModels = () => {
-    if (window.confirm(t.ui.confirmClearAllModels)) {
-      setSelectedModels([]);
-      localStorage.removeItem('selectedModels');
-    }
+  // 在相关的状态处理部分添加
+  const handleModelConfigUpdate = (updatedModel: Model) => {
+    setSelectedModels(prev => prev.map(model => 
+      model.id === updatedModel.id ? updatedModel : model
+    ));
+    
+    localStorage.setItem(`model_config_${updatedModel.id}`, JSON.stringify({
+      customBaseUrl: updatedModel.customBaseUrl,
+      customApiKey: updatedModel.customApiKey
+    }));
   };
 
   return (
@@ -1180,13 +1382,13 @@ export default function Home() {
               </label>
               <input
                 type="text"
-                value={apiConfig.baseUrl}
-                onChange={(e) => setApiConfig(prev => ({
+                value={tempApiConfig.baseUrl}
+                onChange={(e) => setTempApiConfig(prev => ({
                   ...prev,
                   baseUrl: e.target.value
                 }))}
                 className="w-full p-2 border rounded dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-                placeholder="Enter API Base URL"
+                placeholder={t.ui.enterApiBaseUrl}
               />
             </div>
             <div>
@@ -1195,15 +1397,71 @@ export default function Home() {
               </label>
               <input
                 type="password"
-                value={apiConfig.apiKey}
-                onChange={(e) => setApiConfig(prev => ({
+                value={tempApiConfig.apiKey}
+                onChange={(e) => setTempApiConfig(prev => ({
                   ...prev,
                   apiKey: e.target.value
                 }))}
                 className="w-full p-2 border rounded dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-                placeholder="Enter API Key"
+                placeholder={t.ui.enterApiKey}
               />
             </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => selectedModels.length > 0 ? testGlobalConfig(tempApiConfig) : alert(t.ui.selectModelFirst)}
+                className={`px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50 transition-all duration-200 relative ${
+                  isTestingConnection ? 'pl-10' : ''
+                }`}
+                disabled={isTestingConnection || selectedModels.length === 0}
+              >
+                {isTestingConnection && (
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  </div>
+                )}
+                {isTestingConnection ? t.ui.testing : t.ui.testConnection}
+              </button>
+              <button
+                onClick={saveAndApplyConfig}
+                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                disabled={!tempApiConfig.baseUrl || !tempApiConfig.apiKey || selectedModels.length === 0}
+              >
+                {t.ui.saveAndApplyConfig}
+              </button>
+            </div>
+            {selectedModels.length === 0 && (
+              <p className="text-sm text-yellow-600 dark:text-yellow-400">
+                {t.ui.selectModelToTest}
+              </p>
+            )}
+            
+            {showTestResults && (
+              <div className="mt-4 space-y-2">
+                {/* 进度条 */}
+                <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
+                  <div 
+                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                    style={{ width: `${testProgress}%` }}
+                  ></div>
+                </div>
+                
+                {/* 测试日志 */}
+                <div className="max-h-40 overflow-y-auto bg-gray-50 dark:bg-gray-800 rounded p-2 text-sm">
+                  {testLogs.map((log, index) => (
+                    <div 
+                      key={index}
+                      className={`py-1 ${
+                        log.includes('Success') ? 'text-green-600 dark:text-green-400' :
+                        log.includes('Error') || log.includes('Failed') ? 'text-red-600 dark:text-red-400' :
+                        'text-gray-600 dark:text-gray-400'
+                      }`}
+                    >
+                      {log}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1273,7 +1531,7 @@ export default function Home() {
                 </div>
                 <div className="flex-1 overflow-y-auto p-4">
                   {chat.messages.map((message, msgIndex) => {
-                    // 如果是空消息且不是最后一条加载中的消息，则跳过渲染
+                    // 如果是空消息且不是最后一条加载��的消息，则跳过渲染
                     if (!message.content && !(chat.isLoading && msgIndex === chat.messages.length - 1)) {
                       return null;
                     }
@@ -1460,7 +1718,7 @@ export default function Home() {
                   setIsModelSelectorOpen(false);
                   setSelectedVendor(null);
                   setEditingModel(null);
-                  setShowCustomModelForm(false);  // 重置自定义模型表单状态
+                  setShowCustomModelForm(false);  // 重置自义模型表单状态
                 }}
                 className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
               >
@@ -1628,6 +1886,97 @@ export default function Home() {
                 )}
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {showEditDialog && editingModel && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold dark:text-white">
+                {t.ui.editModelTitle.replace('{modelName}', editingModel.name)}
+              </h2>
+              <button
+                onClick={() => {
+                  setShowEditDialog(false);
+                  setEditingModel(null);
+                }}
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  {t.ui.apiBaseUrl}
+                </label>
+                <input
+                  type="text"
+                  value={editingModel.customBaseUrl}
+                  onChange={(e) => setEditingModel(prev => ({
+                    ...prev!,
+                    customBaseUrl: e.target.value
+                  }))}
+                  className="w-full p-2 border rounded dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  placeholder={apiConfig.baseUrl}
+                />
+                <p className="text-xs text-gray-500 mt-1">{t.ui.leaveEmptyDefault}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  {t.ui.apiKey}
+                </label>
+                <input
+                  type="password"
+                  value={editingModel.customApiKey}
+                  onChange={(e) => setEditingModel(prev => ({
+                    ...prev!,
+                    customApiKey: e.target.value
+                  }))}
+                  className="w-full p-2 border rounded dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  placeholder={t.ui.enterApiKey}
+                />
+                <p className="text-xs text-gray-500 mt-1">{t.ui.leaveEmptyDefaultKey}</p>
+              </div>
+
+              <div className="flex justify-end gap-2 mt-4">
+                <button
+                  onClick={() => testModelConnection(editingModel)}
+                  className={`px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50 transition-all duration-200 relative ${
+                    isModelTesting === editingModel.id ? 'pl-10' : ''
+                  }`}
+                  disabled={isModelTesting === editingModel.id}
+                >
+                  {isModelTesting === editingModel.id && (
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    </div>
+                  )}
+                  {isModelTesting === editingModel.id ? t.ui.testing : t.ui.testConnection}
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                >
+                  {t.ui.saveChanges}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowEditDialog(false);
+                    setEditingModel(null);
+                  }}
+                  className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+                >
+                  {t.ui.cancel}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

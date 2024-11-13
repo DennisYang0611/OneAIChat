@@ -97,7 +97,14 @@ export const translations = {
       enterModelName: 'Enter Model Name',
       modelDescription: 'Model Description',
       enterModelDescription: 'Enter Model Description',
-      customModelTitle: 'Add Custom Model'
+      customModelTitle: 'Add Custom Model',
+      configSaved: 'Configuration saved successfully',
+      saveConfig: 'Save Configuration',
+      selectModelFirst: 'Please select a model first',
+      selectModelToTest: 'Select a model to test the configuration',
+      saveAndApplyConfig: 'Save & Apply Configuration',
+      usingModelConfig: ' (Using model specific configuration)',
+      modelNotAvailable: 'Model is not available'
     },
     models: {
       'gpt-3.5-turbo': 'GPT-3.5 Turbo',
@@ -225,7 +232,14 @@ export const translations = {
       enterModelName: '输入模型名称',
       modelDescription: '模型描述',
       enterModelDescription: '输入模型描述',
-      customModelTitle: '添加自定义模型'
+      customModelTitle: '添加自定义模型',
+      configSaved: '配置保存成功',
+      saveConfig: '保存配置',
+      selectModelFirst: '请先选择一个模型',
+      selectModelToTest: '请选择一个模型来测试配置',
+      saveAndApplyConfig: '保存并应用配置',
+      usingModelConfig: ' (使用模型专用配置)',
+      modelNotAvailable: '模型不可用'
     },
     models: {
       'gpt-3.5-turbo': 'GPT-3.5 智能助手',
