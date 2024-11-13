@@ -1,11 +1,11 @@
 # OneAIChat v1.0.3更新
-1.修复一键重新重置对话无法生效的BUG
-2.修复单条对话重新生成按钮无法生效的BUG
-3.新增一键测试模型功能
-4.修复单个对话窗口无法编辑模型的BUG
-5.新增测试模型进度条，提升用户体验
-6.新增测试模型的动画，提升用户体验
-7.完善项目README.md
+### 1.修复一键重新重置对话无法生效的BUG
+### 2.修复单条对话重新生成按钮无法生效的BUG
+### 3.新增一键测试模型功能
+### 4.修复单个对话窗口无法编辑模型的BUG
+### 5.新增测试模型进度条，提升用户体验
+### 6.新增测试模型的动画，提升用户体验
+### 7.完善项目README.md
 # 项目介绍
 用户可以通过本平台一键调用、测试多个模型的对话效果。
 ## 配置全局调用的key
@@ -40,5 +40,8 @@ Sealos链接（杭州可用去）：https://hzh.sealos.run/
 <img width="959" alt="image" src="https://github.com/user-attachments/assets/6cca2630-8761-4392-828d-35a61edc7ec8">
 最终就可以直接请求FastGPT搭建的工作流
 <img width="1789" alt="image" src="https://github.com/user-attachments/assets/3d9ae06b-1ba1-43d5-85ba-fab443a30dfe">
-
+## 关联项目
+FastGPT：https://github.com/labring/FastGPT
+OneAPI：https://github.com/songquanpeng/one-api
+Sealos：https://github.com/labring/sealos
 
