@@ -104,7 +104,11 @@ export const translations = {
       selectModelToTest: 'Select a model to test the configuration',
       saveAndApplyConfig: 'Save & Apply Configuration',
       usingModelConfig: ' (Using model specific configuration)',
-      modelNotAvailable: 'Model is not available'
+      modelNotAvailable: 'Model is not available',
+      allTestsSuccessful: 'All models tested successfully!',
+      someTestsFailed: 'Some models failed the test. Please check the logs above.',
+      testResults: 'Test Results',
+      close: 'Close'
     },
     models: {
       'gpt-3.5-turbo': 'GPT-3.5 Turbo',
@@ -239,7 +243,11 @@ export const translations = {
       selectModelToTest: '请选择一个模型来测试配置',
       saveAndApplyConfig: '保存并应用配置',
       usingModelConfig: ' (使用模型专用配置)',
-      modelNotAvailable: '模型不可用'
+      modelNotAvailable: '模型不可用',
+      allTestsSuccessful: '所有模型测试成功！',
+      someTestsFailed: '部分模型测试失败，请查看上方日志。',
+      testResults: '测试结果',
+      close: '关闭'
     },
     models: {
       'gpt-3.5-turbo': 'GPT-3.5 智能助手',

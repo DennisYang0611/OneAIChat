@@ -491,6 +491,9 @@ export default function Home() {
   const [testProgress, setTestProgress] = useState(0);
   const [testLogs, setTestLogs] = useState<string[]>([]);
   const [showTestResults, setShowTestResults] = useState(false);
+  // 添加一个新的状态来控制结果弹窗
+  const [showTestResultDialog, setShowTestResultDialog] = useState(false);
+  const [testResults, setTestResults] = useState<string[]>([]);
 
   // 获取当前语言的翻译
   const t = translations[language];
@@ -798,6 +801,7 @@ export default function Home() {
     setIsTestingConnection(true);
     setTestProgress(0);
     setTestLogs([]);
+    setTestResults([]);
     setShowTestResults(true);
 
     try {
@@ -880,20 +884,25 @@ export default function Home() {
       }
 
       setTestProgress(100);
+      // 添加最终测试结果
+      const finalMessage = allSuccess 
+        ? t.ui.allTestsSuccessful 
+        : t.ui.someTestsFailed;
+      
+      // 保存所有测试结果
+      setTestResults([...results, '-------------------', finalMessage]);
+      // 显示结果弹窗
+      setShowTestResultDialog(true);
+      
       return allSuccess;
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      setTestLogs(prev => [...prev, `Error: ${errorMessage}`]);
+      setTestResults([`Error: ${errorMessage}`]);
+      setShowTestResultDialog(true);
       return false;
     } finally {
       setIsTestingConnection(false);
-      // 5秒后自动关闭结果显示
-      setTimeout(() => {
-        setShowTestResults(false);
-        setTestLogs([]);
-        setTestProgress(0);
-      }, 5000);
     }
   };
 
@@ -988,7 +997,7 @@ export default function Home() {
     const model = selectedModels.find(m => m.id === modelId);
     if (!model) return;
 
-    // 找到当前聊天记录
+    // 找到当前天记录
     const currentChat = modelChats.find(chat => chat.modelId === modelId);
     if (!currentChat) return;
 
@@ -1531,7 +1540,7 @@ export default function Home() {
                 </div>
                 <div className="flex-1 overflow-y-auto p-4">
                   {chat.messages.map((message, msgIndex) => {
-                    // 如果是空消息且不是最后一条加载��的消息，则跳过渲染
+                    // 如果是空消息且不是最后一条加载的消息，则跳过渲染
                     if (!message.content && !(chat.isLoading && msgIndex === chat.messages.length - 1)) {
                       return null;
                     }
@@ -1976,6 +1985,51 @@ export default function Home() {
                   {t.ui.cancel}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTestResultDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold dark:text-white">
+                {t.ui.testResults}
+              </h2>
+              <button
+                onClick={() => setShowTestResultDialog(false)}
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="space-y-2">
+              {testResults.map((result, index) => (
+                <div 
+                  key={index}
+                  className={`py-2 ${
+                    result.includes('Success') ? 'text-green-600 dark:text-green-400' :
+                    result.includes('Error') || result.includes('Failed') ? 'text-red-600 dark:text-red-400' :
+                    result === '-------------------' ? 'border-t border-gray-200 dark:border-gray-700 my-2' :
+                    'text-gray-600 dark:text-gray-400'
+                  }`}
+                >
+                  {result}
+                </div>
+              ))}
+            </div>
+            
+            <div className="flex justify-end mt-6">
+              <button
+                onClick={() => setShowTestResultDialog(false)}
+                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              >
+                {t.ui.close}
+              </button>
             </div>
           </div>
         </div>
