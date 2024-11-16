@@ -4,24 +4,17 @@ const nextConfig = {
         return [
             {
                 source: '/api/:path*',
-                destination: process.env.NODE_ENV === 'development' 
-                    ? 'http://127.0.0.1:3000/api/:path*'
-                    : '/api/:path*',
+                destination: '/api/:path*',
             }
         ]
     },
-    // 添加不安全的请求配置
     experimental: {
         externalDir: true,
+        serverComponentsExternalPackages: ['sharp'],
     },
-    webpack: (config) => {
-        config.module.rules.push({
-            test: /\.node$/,
-            use: 'node-loader',
-        });
-        return config;
+    serverRuntimeConfig: {
+        timeout: 60000,
     },
-    // 添加安全配置
     async headers() {
         return [
             {
